@@ -1,7 +1,6 @@
 # All of the functions ffrom chapter 7 in networks
 import numpy as np
 import pandas as pd
-import heapq
 
 def adjacency_matrix(df, team_id):
     is_team = df['team_id'] == team_id
@@ -34,7 +33,6 @@ def adjacency_matrix(df, team_id):
 
     A = A_id.to_numpy()
 
-    # column-normalization: column j sums to 1
     col_sums = A_id.sum(axis=0)
     P_id = A_id.divide(col_sums.replace(0, 1), axis=1)
     P = P_id.to_numpy()
@@ -123,7 +121,6 @@ def signed_balance_matrix(df_stories, idx_to_player_id, id_to_name):
             forward_counts[a, b] += 1
         elif dx < 0:
             backward_counts[a, b] += 1
-        # if dx == 0: ignore
 
     S = np.zeros((n, n), dtype=int)
 
@@ -257,10 +254,9 @@ def authorities_hubs_comp(A):
 
     U, s, Vt = np.linalg.svd(A, full_matrices=False)
 
-    x = U[:, 0]       # authorities
-    y = Vt.T[:, 0]    # hubs
+    x = U[:, 0]       
+    y = Vt.T[:, 0]    
 
-    # fix sign
     if x[np.argmax(np.abs(x))] < 0:
         x = -x
     if y[np.argmax(np.abs(y))] < 0:
@@ -405,9 +401,6 @@ def k_core(A, k_in=1, k_out=1):
             if not keep[i]:
                 continue
 
-            # with your convention:
-            # row i  = incoming edges to i
-            # col i  = outgoing edges from i
             in_deg = np.sum(B[i, keep])
             out_deg = np.sum(B[keep, i])
 
@@ -421,7 +414,6 @@ def k_core(A, k_in=1, k_out=1):
 def local_clustering(A, min_passes=1):
     A = np.asarray(A, dtype=float)
 
-    # symmetrize and threshold
     B = ((A >= min_passes) | (A.T >= min_passes)).astype(int)
     np.fill_diagonal(B, 0)
 
