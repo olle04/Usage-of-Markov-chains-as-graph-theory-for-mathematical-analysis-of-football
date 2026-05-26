@@ -3,30 +3,30 @@ import numpy as np
 import pandas as pd
 
 def adjacency_matrix(df, team_id):
-    is_team = df['team_id'] == team_id
-    is_pass = df['type'] == 'pass'
-    is_accurate = df['pass_accurate'] == True
+    is_team = df["team_id"] == team_id
+    is_pass = df["type"] == "pass"
+    is_accurate = df["pass_accurate"] == True
     is_in_play = (
-        (df['throw_in'] == False) &
-        (df['corner'] == False) &
-        (df['goal_kick'] == False) &
-        (df['free_kick'] == False)
+        (df["throw_in"] == False) &
+        (df["corner"] == False) &
+        (df["goal_kick"] == False) &
+        (df["free_kick"] == False)
     )
     passes = df.loc[is_team & is_pass & is_accurate & is_in_play,
-                    ['player_id', 'pass_recipient_id']].copy()
+                    ["player_id", "pass_recipient_id"]].copy()
 
-    passes = passes.dropna(subset=['player_id', 'pass_recipient_id'])
+    passes = passes.dropna(subset=["player_id", "pass_recipient_id"])
 
-    A_id = pd.crosstab(passes['pass_recipient_id'], passes['player_id'])
+    A_id = pd.crosstab(passes["pass_recipient_id"], passes["player_id"])
 
-    players = pd.Index(sorted(set(passes['player_id']).union(set(passes['pass_recipient_id']))))
+    players = pd.Index(sorted(set(passes["player_id"]).union(set(passes["pass_recipient_id"]))))
     A_id = A_id.reindex(index=players, columns=players, fill_value=0).astype(int)
 
     id_to_name = (
-        df[['player_id', 'player_name']]
+        df[["player_id", "player_name"]]
         .dropna()
-        .drop_duplicates('player_id')
-        .set_index('player_id')['player_name']
+        .drop_duplicates("player_id")
+        .set_index("player_id")["player_name"]
     )
 
     A_name = A_id.rename(index=id_to_name, columns=id_to_name)
@@ -39,9 +39,9 @@ def adjacency_matrix(df, team_id):
 
     return A, P, A_id, A_name, id_to_name
 
-def shortest_path_matrix(A):
-    A = np.asarray(A, dtype=float)
-    n = A.shape[0]
+def most_probable_path_matrix(P):
+    P = np.asarray(P, dtype=float)
+    n = P.shape[0]
 
     D = np.full((n, n), np.inf)
     np.fill_diagonal(D, 0.0)
@@ -66,8 +66,8 @@ def shortest_path_matrix(A):
             visited[u] = True
 
             for v in range(n):
-                if A[v, u] > 0 and not visited[v]:
-                    length = 1.0 / A[v, u]
+                if P[v, u] > 0 and not visited[v]:
+                    length = -np.log(P[v, u])
                     new_dist = dist[u] + length
 
                     if new_dist < dist[v]:
@@ -79,23 +79,23 @@ def shortest_path_matrix(A):
 
 def signed_balance_matrix(df_stories, idx_to_player_id, id_to_name):
     mask = (
-        (df_stories['team_name'] == 'Hammarby') &
-        (df_stories['type'] == 'pass') &
-        (df_stories['throw_in'] == False) &
-        (df_stories['corner'] == False) &
-        (df_stories['goal_kick'] == False) &
-        (df_stories['free_kick'] == False) &
-        (df_stories['player_id'] > 0) &
-        (df_stories['pass_recipient_id'] > 0)
+        (df_stories["team_name"] == "Hammarby") &
+        (df_stories["type"] == "pass") &
+        (df_stories["throw_in"] == False) &
+        (df_stories["corner"] == False) &
+        (df_stories["goal_kick"] == False) &
+        (df_stories["free_kick"] == False) &
+        (df_stories["player_id"] > 0) &
+        (df_stories["pass_recipient_id"] > 0)
     )
 
     df_pass = df_stories.loc[
         mask,
-        ['player_id', 'pass_recipient_id', 'start_x', 'end_x']
+        ["player_id", "pass_recipient_id", "start_x", "end_x"]
     ].copy()
 
-    df_pass['start_x'] *= 1.2
-    df_pass['end_x']   *= 1.2
+    df_pass["start_x"] *= 1.2
+    df_pass["end_x"]   *= 1.2
 
     n = len(idx_to_player_id)
     player_to_idx = {pid: i for i, pid in enumerate(idx_to_player_id)}
@@ -104,8 +104,8 @@ def signed_balance_matrix(df_stories, idx_to_player_id, id_to_name):
     backward_counts = np.zeros((n, n), dtype=int)
 
     for _, row in df_pass.iterrows():
-        pid = row['player_id']
-        rid = row['pass_recipient_id']
+        pid = row["player_id"]
+        rid = row["pass_recipient_id"]
 
         if pid not in player_to_idx or rid not in player_to_idx:
             continue
@@ -115,12 +115,13 @@ def signed_balance_matrix(df_stories, idx_to_player_id, id_to_name):
 
         a, b = sorted([i, j])
 
-        dx = row['end_x'] - row['start_x']
+        dx = row["end_x"] - row["start_x"]
 
         if dx > 0:
             forward_counts[a, b] += 1
         elif dx < 0:
             backward_counts[a, b] += 1
+        # if dx == 0: ignore
 
     S = np.zeros((n, n), dtype=int)
 
@@ -206,45 +207,30 @@ def katz_centrality_iter(A, beta = 1.0, max_iter = 1000, tol = 1e-10):
         x = x_new
     return x
 
-def page_rank_comp(A, alpha=0.85):
-    A = np.asarray(A, dtype=float)
-    n = A.shape[0]
+def page_rank_comp(P, alpha=0.85, beta=1.0):
+    P = np.asarray(P, dtype=float)
+    n = P.shape[0]
 
-    k_out = A.sum(axis=0)
-    k_out_safe = k_out.copy()
-    k_out_safe[k_out_safe == 0] = 1.0  
-
-    M = A / k_out_safe  
-
-    B = np.eye(n) - alpha * M
-    b = np.ones(n)
+    B = np.eye(n) - alpha * P
+    b = beta * np.ones(n)
 
     x = np.linalg.solve(B, b)
-
     return x
 
-def page_rank_iter(A, alpha=0.85, max_iter=1000, tol=1e-10):
-    A = np.array(A, dtype=float)
-    n = A.shape[0]
-
-    k_out = A.sum(axis=0)
-    empty = (k_out == 0)
-
-    k_out_safe = k_out.copy()
-    k_out_safe[empty] = 1.0
+def page_rank_iter(P, alpha=0.85, beta=1.0, max_iter=1000, tol=1e-10):
+    P = np.asarray(P, dtype=float)
+    n = P.shape[0]
 
     x = np.ones(n) / n
-    ones = np.ones(n)         
-    beta = 1.0                
+    ones = np.ones(n)
 
     for _ in range(max_iter):
-        link_part = A @ (x / k_out_safe)   
-
-        x_new = alpha * link_part + beta * ones 
+        x_new = alpha * (P @ x) + beta * ones
 
         if np.linalg.norm(x_new - x, 1) < tol:
             x = x_new
             break
+
         x = x_new
 
     return x
@@ -252,77 +238,91 @@ def page_rank_iter(A, alpha=0.85, max_iter=1000, tol=1e-10):
 def authorities_hubs_comp(A):
     A = np.asarray(A, dtype=float)
 
-    U, s, Vt = np.linalg.svd(A, full_matrices=False)
+    eigenvals, eigenvecs = np.linalg.eigh(A @ A.T)
+    k = np.argmax(eigenvals)
 
-    x = U[:, 0]       
-    y = Vt.T[:, 0]    
+    lambda1 = eigenvals[k]
+    x = eigenvecs[:, k]
 
     if x[np.argmax(np.abs(x))] < 0:
         x = -x
+
+    if np.linalg.norm(x) > 0:
+        x = x / np.linalg.norm(x)
+
+    y = (A.T @ x) / np.sqrt(lambda1)
+
+    if np.linalg.norm(y) > 0:
+        y = y / np.linalg.norm(y)
+
     if y[np.argmax(np.abs(y))] < 0:
         y = -y
 
     return x, y
 
-def authorities_hubs_iter(A, max_iter = 1000, tol = 1e-8):
+def authorities_hubs_iter(A, max_iter=1000, tol=1e-8):
     A = np.asarray(A, dtype=float)
     n = A.shape[0]
 
-    y = np.ones(n)
-    y /= np.linalg.norm(y)
+    x = np.ones(n)
+    x = x / np.linalg.norm(x)
 
-    for i in range(max_iter):
-        x = A @ y
-        if np.linalg.norm(x) == 0:
+    lambda_old = 0.0
+
+    for _ in range(max_iter):
+        x_new = (A @ A.T) @ x
+
+        norm = np.linalg.norm(x_new)
+        if norm == 0:
             break
+        x_new = x_new / norm
+
+        lambda_new = float(x_new @ ((A @ A.T) @ x_new))
+
+        if np.linalg.norm(x_new - x) < tol:
+            x = x_new
+            lambda_old = lambda_new
+            break
+
+        x = x_new
+        lambda_old = lambda_new
+
+    if lambda_old > 0:
+        y = (A.T @ x) / np.sqrt(lambda_old)
+    else:
+        y = np.zeros(n)
+
+    if np.linalg.norm(x) > 0:
         x = x / np.linalg.norm(x)
+    if np.linalg.norm(y) > 0:
+        y = y / np.linalg.norm(y)
 
-        y_new = A.T @ x
-        if np.linalg.norm(y_new) == 0:
-            break
-        y_new = y_new / np.linalg.norm(y_new)
-
-        if np.linalg.norm(y_new - y) < tol:
-            y = y_new
-            break
-
-        y = y_new
+    if x[np.argmax(np.abs(x))] < 0:
+        x = -x
+    if np.linalg.norm(y) > 0 and y[np.argmax(np.abs(y))] < 0:
+        y = -y
 
     return x, y
 
-def closeness_centrality_simple(P):
-    P = np.asarray(P, dtype=float)
-    n = P.shape[0]
-    c = np.zeros(n, dtype=float)
+def closeness_centrality(D):
+    D = np.asarray(D, dtype=float)
+    n = D.shape[0]
+    c = np.zeros(n)
 
     for i in range(n):
-        mask = np.isfinite(P[i])
-        mask[i] = False
+        reachable = np.isfinite(D[i])
+        reachable[i] = False
 
-        dist_sum = np.sum(P[i, mask])
+        dist_sum = np.sum(D[i, reachable])
 
         if dist_sum > 0:
-            c[i] = 1.0 / dist_sum
+            c[i] = np.sum(reachable) / dist_sum
         else:
             c[i] = 0.0
 
     return c
 
-def harmonic_closeness_centrality(P):
-    P = np.asarray(P, dtype=float)
-    n = P.shape[0]
-    c = np.zeros(n)
-
-    for i in range(n):
-        s = 0.0
-        for j in range(n):
-            if i != j and np.isfinite(P[i, j]) and P[i, j] > 0:
-                s += 1 / P[i, j]
-        c[i] = s / (n - 1)
-
-    return c
-
-def betweenness_centrality(A, normalized=True):
+def betweenness_centrality(A):
     A = np.asarray(A, dtype=float)
     n = A.shape[0]
     c = np.zeros(n, dtype=float)
@@ -380,8 +380,7 @@ def betweenness_centrality(A, normalized=True):
             if w != s:
                 c[w] += delta[w]
 
-    if normalized and n > 2:
-        c = c / ((n - 1) * (n - 2))
+    c = c / (n * (n - 1))
 
     return c
 
@@ -401,6 +400,9 @@ def k_core(A, k_in=1, k_out=1):
             if not keep[i]:
                 continue
 
+            # with your convention:
+            # row i  = incoming edges to i
+            # col i  = outgoing edges from i
             in_deg = np.sum(B[i, keep])
             out_deg = np.sum(B[keep, i])
 
@@ -414,6 +416,7 @@ def k_core(A, k_in=1, k_out=1):
 def local_clustering(A, min_passes=1):
     A = np.asarray(A, dtype=float)
 
+    # symmetrize and threshold
     B = ((A >= min_passes) | (A.T >= min_passes)).astype(int)
     np.fill_diagonal(B, 0)
 
@@ -465,6 +468,9 @@ def reciprocity_local(A):
     r = np.zeros(n, dtype=float)
 
     for i in range(n):
+        # with your convention:
+        # row i    = incoming edges to i
+        # column i = outgoing edges from i
         k_in = np.sum(B[i, :])
         k_out = np.sum(B[:, i])
 
@@ -583,9 +589,11 @@ def structural_balance_groups(S):
             if S[i, j] == 0:
                 continue
 
+            # negative edge inside a group -> not balanced
             if group[i] == group[j] and S[i, j] == -1:
                 return False, None, None
 
+            # positive edge between groups -> not balanced
             if group[i] != group[j] and S[i, j] == 1:
                 return False, None, None
 
@@ -597,12 +605,12 @@ def structural_balance_groups(S):
 
     return True, group, clusters
 
-def pearson_matrix(A, mode='out'):
+def pearson_matrix(A, mode="out"):
     A = np.asarray(A, dtype=float)
 
-    if mode == 'out':
+    if mode == "out":
         X = A.T      
-    elif mode == 'in':
+    elif mode == "in":
         X = A        
     else:
         raise ValueError("mode must be 'out' or 'in'")
@@ -629,23 +637,23 @@ def pearson_matrix(A, mode='out'):
 
     return R
 
-def modularity(A, idx_to_player_id, df, role_col='role'):
+def modularity(A, idx_to_player_id, df, role_col="role"):
     A = np.asarray(A, dtype=float)
-    A_undir = A + A.T
-
-    k = A_undir.sum(axis=1)
-    two_m = A_undir.sum()
-
     n = len(idx_to_player_id)
 
-    if two_m == 0:
+    k_in = A.sum(axis=1)
+    k_out = A.sum(axis=0)
+
+    m = A.sum()
+
+    if m == 0:
         return np.zeros(n), 0.0
 
     role_map = (
-        df[['player_id', role_col]]
+        df[["player_id", role_col]]
         .dropna()
-        .drop_duplicates('player_id')
-        .set_index('player_id')[role_col]
+        .drop_duplicates("player_id")
+        .set_index("player_id")[role_col]
         .to_dict()
     )
 
@@ -654,11 +662,26 @@ def modularity(A, idx_to_player_id, df, role_col='role'):
     c = np.zeros(n, dtype=float)
 
     for i in range(n):
+        if k_in[i] == 0 or roles[i] is None:
+            c[i] = 0.0
+            continue
+
         s = 0.0
         for j in range(n):
-            if roles[i] is not None and roles[i] == roles[j]:
-                s += A_undir[i, j] - (k[i] * k[j]) / two_m
-        c[i] = s / two_m
+            if roles[j] is not None and roles[i] == roles[j]:
+                s += A[i, j] - (k_in[i] * k_out[j]) / m
 
-    Q = np.sum(c)
+        c[i] = s / k_in[i]
+
+    Q_sum = 0.0
+    for i in range(n):
+        if roles[i] is None:
+            continue
+
+        for j in range(n):
+            if roles[j] is not None and roles[i] == roles[j]:
+                Q_sum += A[i, j] - (k_in[i] * k_out[j]) / (2 * m)
+
+    Q = Q_sum / m
+
     return c, float(Q)
